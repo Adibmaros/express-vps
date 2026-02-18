@@ -45,38 +45,44 @@ const User = sequelize.define(
 );
 
 // 3. Fungsi Sinkronisasi dengan Retry Logic
-// Ini akan mencoba koneksi setiap 5 detik jika database belum siap
+// Ini akan terus mencoba koneksi selama database MySQL melakukan booting
 const syncDatabase = async () => {
   let connected = false;
   let attempts = 0;
 
-  while (!connected && attempts < 10) {
+  while (!connected && attempts < 15) {
     try {
       await sequelize.authenticate();
-      // 'alter: true' akan menyesuaikan tabel dengan model tanpa menghapus data yang ada
+      // 'alter: true' memastikan tabel dibuat/diperbarui otomatis
       await sequelize.sync({ alter: true });
       console.log("✅ Database & Tables synced successfully");
       connected = true;
     } catch (err) {
       attempts++;
-      console.log(`❌ Attempt ${attempts}: Database not ready yet (EAI_AGAIN/ECONNREFUSED). Retrying in 5s...`);
-      await new Promise((res) => setTimeout(res, 5000)); // Tunggu 5 detik
+      console.log(`❌ Attempt ${attempts}: MySQL not ready. Retrying in 5s...`);
+      await new Promise((res) => setTimeout(res, 5000));
     }
   }
 
   if (!connected) {
-    console.error("🛑 Could not connect to database after multiple attempts.");
+    console.error("🛑 Final Failure: Could not connect to database.");
   }
 };
 
 syncDatabase();
 
-// --- ROUTES ---
+// --- FULL ROUTES ---
 
+// 1. Welcome Route
 app.get("/", (req, res) => {
-  res.status(200).json({ message: "Welcome to Express API!", version: "1.1.0" });
+  res.status(200).json({
+    message: "Welcome to Express API!",
+    version: "1.1.0",
+    status: "Running",
+  });
 });
 
+// 2. GET All Users
 app.get("/users", async (req, res) => {
   try {
     const users = await User.findAll();
@@ -86,6 +92,18 @@ app.get("/users", async (req, res) => {
   }
 });
 
+// 3. GET User by ID
+app.get("/users/:id", async (req, res) => {
+  try {
+    const user = await User.findByPk(req.params.id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 4. POST Create User
 app.post("/users", async (req, res) => {
   try {
     const { name, email } = req.body;
@@ -96,12 +114,32 @@ app.post("/users", async (req, res) => {
   }
 });
 
-// Route lainnya tetap sama...
-app.get("/users/:id", async (req, res) => {
+// 5. PUT Update User
+app.put("/users/:id", async (req, res) => {
+  try {
+    const { name, email } = req.body;
+    const user = await User.findByPk(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    user.name = name;
+    user.email = email;
+    await user.save();
+    res.json(user);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// 6. DELETE User
+app.delete("/users/:id", async (req, res) => {
   try {
     const user = await User.findByPk(req.params.id);
-    if (!user) return res.status(404).json({ message: "User not found" });
-    res.json(user);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    await user.destroy();
+    res.status(200).json({ message: "User deleted successfully" });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
